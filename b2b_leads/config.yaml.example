@@ -1,0 +1,39 @@
+# config.yaml.example
+# Kopiere diese Datei nach config.yaml und passe die Werte an.
+
+pipeline:
+  # Eingabepfade
+  companies_file: "input/companies.csv"
+  job_profiles_file: "input/job_profiles.csv"
+  product_context_file: "input/product_context.md"
+
+  # Verarbeitungsoptionen
+  max_persons_per_company: 10
+  min_relevanz: 2              # Nur Leads mit Relevanz >= 2 exportieren
+
+  # Export
+  export_csv: true
+  export_xlsx: true
+  export_json: true
+
+scraper:
+  timeout: 10                  # Sekunden pro Request
+  delay: 1.5                   # Pause zwischen Requests (Rate-limiting)
+  max_retries: 3
+  backoff_base: 2.0            # Exponentieller Backoff: 2s, 4s, 8s
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 2
+
+logging:
+  level: "INFO"                # DEBUG | INFO | WARNING | ERROR
+  log_dir: "logs"
+
+# Pfade
+paths:
+  input_dir: "input"
+  output_dir: "output"
+  data_dir: "data"             # Zwischenstände
+  logs_dir: "logs"

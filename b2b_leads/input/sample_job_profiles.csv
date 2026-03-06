@@ -1,0 +1,6 @@
+id,bezeichnung,titel_synonyme,verantwortungs_keywords,senioritaet_min,entscheider,gewichtung
+head_of_marketing,Head of Marketing,"Head of Marketing;VP Marketing;Marketing Director;CMO;Marketingleiter;Chief Marketing Officer","marketing;demand generation;lead generation;brand;campaign;digital marketing;performance marketing",VP,ja,1.5
+sales_director,Sales Director,"Sales Director;Head of Sales;VP Sales;CSO;Vertriebsleiter;Chief Sales Officer;Head of Revenue","sales;revenue;pipeline;business development;key account;b2b sales;new business",VP,ja,1.8
+cto_vp_tech,CTO / VP Technology,"CTO;VP Engineering;Head of Technology;Technologieleiter;IT-Leiter;Chief Technology Officer","technology;engineering;software;infrastructure;cloud;digitalisierung;tech stack;architecture",VP,ja,1.6
+product_manager,Product Manager,"Product Manager;Head of Product;CPO;Produktmanager;Senior Product Manager","product;roadmap;features;user stories;product strategy;ux;product development",Manager,nein,1.2
+ceo_founder,CEO / Founder,"CEO;Founder;Gründer;Geschäftsführer;Managing Director;Co-Founder","strategy;growth;fundraising;vision;leadership;scaling;revenue",C-Level,ja,2.0
