@@ -1,0 +1,130 @@
+{
+  "run_id": "offline-demo",
+  "generated_at": "2026-03-06T13:36:56.868391",
+  "total_leads_researched": 13,
+  "total_leads_exported": 13,
+  "high_priority_records": 0,
+  "priority_distribution": {
+    "A": 0,
+    "B": 12,
+    "C": 1
+  },
+  "relevanz_distribution": {
+    "1": 1,
+    "2": 0,
+    "3": 12,
+    "4": 0,
+    "5": 0
+  },
+  "email_status_distribution": {
+    "VERIFIED": 0,
+    "INFERRED": 13,
+    "UNKNOWN": 0
+  },
+  "top_leads": [
+    {
+      "name": "Anna Müller",
+      "firma": "TechVision GmbH",
+      "jobtitel": "Head of Marketing",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Klaus Berger",
+      "firma": "TechVision GmbH",
+      "jobtitel": "CTO",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Maria Schmidt",
+      "firma": "TechVision GmbH",
+      "jobtitel": "Product Manager",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Thomas Weber",
+      "firma": "DataFlow AG",
+      "jobtitel": "VP Sales",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Sandra Klein",
+      "firma": "DataFlow AG",
+      "jobtitel": "CEO",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Julia Fischer",
+      "firma": "CloudBase Ltd",
+      "jobtitel": "Head of Sales",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Peter Koch",
+      "firma": "CloudBase Ltd",
+      "jobtitel": "Senior Product Manager",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Stefan Wagner",
+      "firma": "MarketPro GmbH",
+      "jobtitel": "Founder & CEO",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Lisa Hoffmann",
+      "firma": "MarketPro GmbH",
+      "jobtitel": "VP Marketing",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Max Richter",
+      "firma": "MarketPro GmbH",
+      "jobtitel": "Sales Director",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Nina Bauer",
+      "firma": "InnoFinance AG",
+      "jobtitel": "CMO",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Robert Schulz",
+      "firma": "InnoFinance AG",
+      "jobtitel": "CTO",
+      "relevanz": 3,
+      "prioritaet": "B",
+      "email_status": "INFERRED"
+    },
+    {
+      "name": "Felix Braun",
+      "firma": "DataFlow AG",
+      "jobtitel": "Marketing Manager",
+      "relevanz": 1,
+      "prioritaet": "C",
+      "email_status": "INFERRED"
+    }
+  ]
+}
