@@ -1,0 +1,223 @@
+{
+  "name": "B2B Follow-Up Sequenz — Oracle ISV DACH",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9 * * 1-5"
+            }
+          ]
+        }
+      },
+      "id": "cron-trigger",
+      "name": "Cron Trigger — Mo-Fr 09:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [220, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst sentEmails = staticData.sentEmails || [];\nconst now = new Date();\n\nconst pending = sentEmails.filter(record => {\n  if (!record.next_follow_up) return false;\n  const followUpDate = new Date(record.next_follow_up);\n  return followUpDate <= now && record.sequence_step < (record.follow_up_days?.length || 3);\n});\n\nif (pending.length === 0) return [];\n\nreturn pending.map(record => ({\n  json: { ...record, sequence_step: record.sequence_step + 1 }\n}));"
+      },
+      "id": "check-pending",
+      "name": "Check Pending Follow-Ups",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "const record = $input.all()[0].json;\nconst step = record.sequence_step;\nconst firstName = record.lead_name.split(' ')[0];\n\nconst followUpTemplates = {\n  2: {\n    subject: `Re: ${record.subject}`,\n    body: `Sehr geehrte/r ${firstName},\\n\\nich wollte kurz nachfassen — hatten Sie Gelegenheit, meine letzte Nachricht zu lesen?\\n\\nIch bin überzeugt, dass Oracle Cloud Infrastructure für ${record.company} einen echten Unterschied machen kann:\\n- Kostenoptimierung Ihrer Cloud-Ausgaben\\n- EU Sovereign Cloud für Compliance\\n- Multicloud-Flexibilität\\n\\nWann passt es Ihnen für ein kurzes 15-Minuten-Gespräch?\\n\\nMit freundlichen Grüßen`\n  },\n  3: {\n    subject: `Re: ${record.subject}`,\n    body: `Sehr geehrte/r ${firstName},\\n\\ndies ist meine letzte Nachricht zu diesem Thema. Ich verstehe, dass Sie beschäftigt sind.\\n\\nFalls Cloud-Infrastruktur oder Multicloud-Strategien in Zukunft für ${record.company} relevant werden, stehe ich Ihnen jederzeit zur Verfügung.\\n\\nDarf ich Sie in 3 Monaten nochmals kontaktieren?\\n\\nMit freundlichen Grüßen`\n  }\n};\n\nconst template = followUpTemplates[step] || followUpTemplates[3];\n\nreturn [{\n  json: {\n    email_to: record.email,\n    email_subject: template.subject,\n    email_body: template.body,\n    lead: { full_name: record.lead_name, email: record.email },\n    company_data: { name: record.company },\n    campaign: { max_emails_per_day: 30 },\n    sequence_step: step,\n    original_record: record\n  }\n}];"
+      },
+      "id": "build-followup",
+      "name": "Build Follow-Up Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [700, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst today = new Date().toISOString().slice(0, 10);\n\nif (!staticData.followUpEmailsSent) staticData.followUpEmailsSent = {};\nif (!staticData.followUpEmailsSent[today]) staticData.followUpEmailsSent[today] = 0;\n\nconst limit = $input.all()[0].json.campaign.max_emails_per_day || 30;\nconst sentToday = staticData.followUpEmailsSent[today];\n\nif (sentToday >= limit) {\n  return [];\n}\n\nstaticData.followUpEmailsSent[today] = sentToday + 1;\nreturn $input.all();"
+      },
+      "id": "check-followup-limit",
+      "name": "Check Follow-Up Daily Limit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [940, 460]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/me/sendMail",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {\n    \"subject\": \"{{ $json.email_subject }}\",\n    \"body\": {\n      \"contentType\": \"HTML\",\n      \"content\": \"{{ $json.email_body.split('\\\\n').join('<br>') }}\"\n    },\n    \"toRecipients\": [\n      {\n        \"emailAddress\": {\n          \"address\": \"{{ $json.email_to }}\",\n          \"name\": \"{{ $json.lead.full_name }}\"\n        }\n      }\n    ],\n    \"importance\": \"normal\"\n  },\n  \"saveToSentItems\": true\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "send-followup",
+      "name": "Send Follow-Up via Graph API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1180, 460],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "MICROSOFT_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph OAuth2"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst sentEmails = staticData.sentEmails || [];\nconst currentRecord = $input.all()[0].json.original_record;\nconst currentStep = $input.all()[0].json.sequence_step;\n\n// Find and update the original record\nfor (let i = 0; i < sentEmails.length; i++) {\n  if (sentEmails[i].email === currentRecord.email && sentEmails[i].sent_at === currentRecord.sent_at) {\n    sentEmails[i].sequence_step = currentStep;\n    \n    const followUpDays = sentEmails[i].follow_up_days || [3, 7, 14];\n    if (currentStep < followUpDays.length) {\n      const daysUntil = followUpDays[currentStep];\n      sentEmails[i].next_follow_up = new Date(Date.now() + daysUntil * 86400000).toISOString();\n    } else {\n      sentEmails[i].next_follow_up = null;\n      sentEmails[i].sequence_completed = true;\n    }\n    \n    sentEmails[i].last_follow_up_at = new Date().toISOString();\n    break;\n  }\n}\n\nstaticData.sentEmails = sentEmails;\n\nreturn [{\n  json: {\n    status: 'follow_up_sent',\n    email: currentRecord.email,\n    lead_name: currentRecord.lead_name,\n    company: currentRecord.company,\n    sequence_step: currentStep,\n    sent_at: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "update-log",
+      "name": "Update Follow-Up Log",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1420, 460]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 61) + 30 }}",
+        "unit": "seconds"
+      },
+      "id": "wait-followup",
+      "name": "Wait Between Follow-Ups",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1660, 460]
+    },
+    {
+      "parameters": {
+        "content": "## Follow-Up Sequenz\nCron Mo-Fr 09:00 → Check Pending → Build Email → Send → Update Log\n\nDieser Workflow läuft separat vom Hauptworkflow.\nEr nutzt die gleichen Static Data (sentEmails) wie der Hauptworkflow.",
+        "width": 600,
+        "height": 160
+      },
+      "id": "note-followup",
+      "name": "Sticky Note — Follow-Up Info",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [180, 260]
+    },
+    {
+      "parameters": {
+        "content": "## Konfiguration\n\n**Benötigte Credentials:**\n- Microsoft Graph OAuth2 (Delegated: Mail.Send, User.Read)\n\n**Static Data:**\n- Wird vom Hauptworkflow befüllt (sentEmails Array)\n- Enthält: email, lead_name, company, subject, follow_up_days, sequence_step, next_follow_up\n\n**WICHTIG:** Beide Workflows müssen im gleichen N8N-Workspace laufen, damit sie die gleichen Static Data teilen können.",
+        "width": 600,
+        "height": 240
+      },
+      "id": "note-config",
+      "name": "Sticky Note — Config",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [180, 600]
+    }
+  ],
+  "connections": {
+    "Cron Trigger — Mo-Fr 09:00": {
+      "main": [
+        [
+          {
+            "node": "Check Pending Follow-Ups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Pending Follow-Ups": {
+      "main": [
+        [
+          {
+            "node": "Build Follow-Up Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Follow-Up Email": {
+      "main": [
+        [
+          {
+            "node": "Check Follow-Up Daily Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Follow-Up Daily Limit": {
+      "main": [
+        [
+          {
+            "node": "Send Follow-Up via Graph API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Follow-Up via Graph API": {
+      "main": [
+        [
+          {
+            "node": "Update Follow-Up Log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Follow-Up Log": {
+      "main": [
+        [
+          {
+            "node": "Wait Between Follow-Ups",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "B2B Outreach",
+      "createdAt": "2026-03-09T00:00:00.000Z",
+      "updatedAt": "2026-03-09T00:00:00.000Z"
+    },
+    {
+      "name": "Follow-Up",
+      "createdAt": "2026-03-09T00:00:00.000Z",
+      "updatedAt": "2026-03-09T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-03-09T00:00:00.000Z",
+  "versionId": "1"
+}

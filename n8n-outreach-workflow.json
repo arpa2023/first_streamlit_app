@@ -1,0 +1,1118 @@
+{
+  "name": "B2B Outreach — Oracle ISV DACH",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger",
+      "name": "Start — Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [220, 460]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "outreach/start",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Start — Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [220, 660],
+      "webhookId": "outreach-start"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.all()[0].json;\nif (!input.companies || !Array.isArray(input.companies) || input.companies.length === 0) {\n  throw new Error('Input muss \"companies\" Array enthalten');\n}\nfor (const company of input.companies) {\n  if (!company.name) throw new Error('Jede Company braucht einen \"name\"');\n  if (!company.target_titles || company.target_titles.length === 0) {\n    throw new Error(`Company \"${company.name}\" braucht \"target_titles\"`);\n  }\n}\nconst campaign = input.campaign || {};\ncampaign.name = campaign.name || `Outreach ${new Date().toISOString().slice(0,10)}`;\ncampaign.language = campaign.language || 'de';\ncampaign.max_emails_per_day = campaign.max_emails_per_day || 30;\ncampaign.follow_up_days = campaign.follow_up_days || [3, 7, 14];\ncampaign.email_template_id = campaign.email_template_id || 'oracle_isv_default';\n\nreturn input.companies.map(c => ({\n  json: { company: c, campaign }\n}));"
+      },
+      "id": "validate-input",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 560]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "split-companies",
+      "name": "Split Companies",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [700, 560]
+    },
+    {
+      "parameters": {
+        "url": "=https://{{ $json.company.website }}",
+        "options": {
+          "timeout": 10000,
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 5
+            }
+          },
+          "allowUnauthorizedCerts": true
+        }
+      },
+      "id": "scrape-company",
+      "name": "Scrape Company Website",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 560],
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const html = $input.all()[0].json.data || $input.all()[0].json.body || '';\nconst companyData = $input.all()[0].json.company || $('Split Companies').first().json.company;\nconst campaign = $input.all()[0].json.campaign || $('Split Companies').first().json.campaign;\n\nconst metaMatch = html.match(/<meta[^>]*name=[\"']description[\"'][^>]*content=[\"']([^\"']+)[\"']/i);\nconst description = metaMatch ? metaMatch[1] : String(html).replace(/<[^>]+>/g, ' ').substring(0, 500).trim();\n\nconst techKeywords = ['oracle', 'aws', 'azure', 'cloud', 'saas', 'api', 'database', 'kubernetes', 'docker', 'java', '.net', 'python', 'microservices', 'iot', 'ai', 'machine learning'];\nconst htmlLower = String(html).toLowerCase();\nconst foundTech = techKeywords.filter(kw => htmlLower.includes(kw));\n\nconst industryKeywords = ['manufacturing', 'finance', 'insurance', 'healthcare', 'logistics', 'retail', 'energy', 'automotive', 'pharma', 'medtech', 'security', 'banking'];\nconst foundIndustry = industryKeywords.filter(kw => htmlLower.includes(kw));\n\nreturn [{\n  json: {\n    company: { ...companyData, description, tech_stack_indicators: foundTech, industry_indicators: foundIndustry, analyzed_at: new Date().toISOString() },\n    campaign\n  }\n}];"
+      },
+      "id": "extract-company-info",
+      "name": "Extract Company Info",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1140, 560]
+    },
+    {
+      "parameters": {
+        "amount": 2,
+        "unit": "seconds"
+      },
+      "id": "wait-company",
+      "name": "Wait — Rate Limit Company",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1360, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "const company = $input.all()[0].json.company;\nconst campaign = $input.all()[0].json.campaign;\n\nreturn company.target_titles.map(title => ({\n  json: {\n    search_query: `${title} ${company.name}`,\n    company_name: company.name,\n    target_title: title,\n    company_data: company,\n    campaign\n  }\n}));"
+      },
+      "id": "build-pb-searches",
+      "name": "Build Phantombuster Searches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1580, 560]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.phantombuster.com/api/v2/agents/launch",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"id\": \"{{ $vars.PHANTOMBUSTER_SEARCH_AGENT_ID }}\",\n  \"argument\": {\n    \"searches\": \"{{ $json.search_query }}\",\n    \"numberOfResultsPerSearch\": 10,\n    \"category\": \"People\"\n  }\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "pb-launch",
+      "name": "Phantombuster — LinkedIn Search Export",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1800, 560],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PHANTOMBUSTER_CREDENTIAL_ID",
+          "name": "Phantombuster API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "id": "wait-pb",
+      "name": "Wait for Phantombuster",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2020, 560]
+    },
+    {
+      "parameters": {
+        "url": "https://api.phantombuster.com/api/v2/agents/fetch-output",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $vars.PHANTOMBUSTER_SEARCH_AGENT_ID }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "pb-fetch",
+      "name": "Fetch Phantombuster Results",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2240, 560],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PHANTOMBUSTER_CREDENTIAL_ID",
+          "name": "Phantombuster API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = $input.all()[0].json;\nconst companyData = $('Build Phantombuster Searches').first().json.company_data;\nconst targetTitle = $('Build Phantombuster Searches').first().json.target_title;\nconst campaign = $('Build Phantombuster Searches').first().json.campaign;\n\nlet profiles = [];\ntry {\n  const outputRaw = results.output || results.data || '[]';\n  const output = typeof outputRaw === 'string' ? JSON.parse(outputRaw) : outputRaw;\n  const arr = Array.isArray(output) ? output : [];\n  profiles = arr\n    .filter(p => p.name && p.profileUrl)\n    .map(p => ({\n      full_name: p.name,\n      first_name: p.name.split(' ')[0],\n      last_name: p.name.split(' ').slice(1).join(' '),\n      linkedin_url: p.profileUrl,\n      job_title: p.title || targetTitle,\n      company_mentioned: p.companyName || companyData.name,\n      location: p.location || '',\n      headline: p.headline || ''\n    }));\n} catch (e) {\n  profiles = [];\n}\n\nif (profiles.length === 0) return [];\n\nreturn profiles.map(p => ({\n  json: { profile: p, company_data: companyData, campaign }\n}));"
+      },
+      "id": "parse-linkedin",
+      "name": "Parse LinkedIn Profiles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2460, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst seen = new Set();\nconst unique = [];\nfor (const item of items) {\n  const url = item.json.profile.linkedin_url;\n  if (!seen.has(url)) {\n    seen.add(url);\n    unique.push(item);\n  }\n}\nreturn unique.slice(0, 5);"
+      },
+      "id": "dedup-profiles",
+      "name": "Deduplicate Profiles",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2680, 560]
+    },
+    {
+      "parameters": {
+        "amount": 5,
+        "unit": "seconds"
+      },
+      "id": "wait-pb-rate",
+      "name": "Wait — Rate Limit Phantombuster",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2900, 560]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.prospeo.io/linkedin-email-finder",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"url\": \"{{ $json.profile.linkedin_url }}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "prospeo-linkedin",
+      "name": "Prospeo — LinkedIn Email Finder",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3120, 560],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PROSPEO_CREDENTIAL_ID",
+          "name": "Prospeo API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "check-email-found",
+              "leftValue": "={{ $json.response?.email }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-prospeo-email",
+      "name": "IF — Prospeo Email Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [3340, 560]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.prospeo.io/email-finder",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"first_name\": \"{{ $('Deduplicate Profiles').item.json.profile.first_name }}\",\n  \"last_name\": \"{{ $('Deduplicate Profiles').item.json.profile.last_name }}\",\n  \"company_name\": \"{{ $('Deduplicate Profiles').item.json.company_data.name }}\",\n  \"domain\": \"{{ $('Deduplicate Profiles').item.json.company_data.website }}\"\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "prospeo-fallback",
+      "name": "Prospeo — Email Finder (Fallback)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3560, 740],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PROSPEO_CREDENTIAL_ID",
+          "name": "Prospeo API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const prospeoResult = $input.all()[0].json;\nconst profileNode = $('Deduplicate Profiles');\nconst profile = profileNode.first().json.profile;\nconst companyData = profileNode.first().json.company_data;\nconst campaign = profileNode.first().json.campaign;\n\nlet email = null;\nlet emailConfidence = 0;\n\nif (prospeoResult.response && prospeoResult.response.email) {\n  email = prospeoResult.response.email;\n  emailConfidence = prospeoResult.response.email_confidence || prospeoResult.response.confidence || 0;\n}\n\nif (!email) return [];\n\nreturn [{\n  json: {\n    profile: { ...profile, email, email_confidence: emailConfidence, email_source: 'prospeo' },\n    company_data: companyData,\n    campaign\n  }\n}];"
+      },
+      "id": "process-prospeo",
+      "name": "Process Prospeo Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3780, 560]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "id": "wait-prospeo",
+      "name": "Wait — Rate Limit Prospeo",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [4000, 560]
+    },
+    {
+      "parameters": {
+        "url": "https://api.usebouncer.com/v1.1/email/verify",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "httpHeaderAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "={{ $json.profile.email }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "bouncer-verify",
+      "name": "Bouncer — Verify Email",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [4220, 560],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "BOUNCER_CREDENTIAL_ID",
+          "name": "Bouncer API"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const bouncerResult = $input.all()[0].json;\nconst prevData = $('Wait — Rate Limit Prospeo').first().json;\nconst profile = prevData.profile;\nconst companyData = prevData.company_data;\nconst campaign = prevData.campaign;\n\nconst status = bouncerResult.status || 'unknown';\nconst isValid = ['deliverable', 'risky'].includes(status);\n\nif (!isValid) return [];\n\nreturn [{\n  json: {\n    profile: { ...profile, email_verified: true, email_status: status, email_reason: bouncerResult.reason || '' },\n    company_data: companyData,\n    campaign\n  }\n}];"
+      },
+      "id": "filter-verified",
+      "name": "Filter Verified Emails",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4440, 560]
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "id": "wait-bouncer",
+      "name": "Wait — Rate Limit Bouncer",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [4660, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "const profile = $input.all()[0].json.profile;\nconst company = $input.all()[0].json.company_data;\nconst campaign = $input.all()[0].json.campaign;\n\nlet score = 0;\nconst details = {};\n\n// 1. METRICS (0-20): Tech-Stack Indikatoren = Cloud/DB-Bedarf\nconst techScore = Math.min((company.tech_stack_indicators?.length || 0) * 4, 20);\nscore += techScore;\ndetails.metrics = { score: techScore, reason: `${company.tech_stack_indicators?.length || 0} Tech-Indikatoren` };\n\n// 2. ECONOMIC BUYER (0-20): Entscheider-Position?\nconst buyerTitles = ['ceo', 'cto', 'cfo', 'cio', 'vp', 'vice president', 'director', 'head of', 'geschäftsführer', 'vorstand', 'leiter'];\nconst titleLower = (profile.job_title || '').toLowerCase();\nconst isBuyer = buyerTitles.some(t => titleLower.includes(t));\nconst buyerScore = isBuyer ? 20 : (titleLower.includes('manager') ? 10 : 5);\nscore += buyerScore;\ndetails.economic_buyer = { score: buyerScore, reason: profile.job_title };\n\n// 3. DECISION CRITERIA (0-15): Tech-Relevanz des Titels\nconst techTitles = ['cloud', 'infrastructure', 'platform', 'data', 'digital', 'transformation', 'it ', 'technology', 'engineering', 'development', 'software'];\nconst techRelevance = techTitles.filter(t => titleLower.includes(t)).length;\nconst dcScore = Math.min(techRelevance * 5, 15);\nscore += dcScore;\ndetails.decision_criteria = { score: dcScore, reason: `${techRelevance} tech-Keywords im Titel` };\n\n// 4. DECISION PROCESS (0-15): Email Confidence als Erreichbarkeits-Proxy\nconst emailConfScore = profile.email_confidence > 90 ? 15 : (profile.email_confidence > 70 ? 10 : 5);\nscore += emailConfScore;\ndetails.decision_process = { score: emailConfScore, reason: `Email Confidence: ${profile.email_confidence}%` };\n\n// 5. IDENTIFY PAIN (0-15): Industrie-Relevanz für Oracle\nconst oracleIndustries = ['finance', 'insurance', 'banking', 'manufacturing', 'logistics', 'healthcare', 'energy', 'retail', 'automotive'];\nconst industryMatch = (company.industry_indicators || []).filter(i => oracleIndustries.includes(i)).length;\nconst painScore = Math.min(industryMatch * 5, 15);\nscore += painScore;\ndetails.identify_pain = { score: painScore, reason: `${industryMatch} Oracle-relevante Branchen` };\n\n// 6. CHAMPION (0-15): LinkedIn Headline als Aktivitäts-Proxy\nconst championScore = profile.headline?.length > 50 ? 15 : (profile.headline?.length > 20 ? 10 : 5);\nscore += championScore;\ndetails.champion = { score: championScore, reason: `Headline ${profile.headline?.length || 0} Zeichen` };\n\n// Kategorisierung\nlet category;\nif (score >= 70) category = 'HOT';\nelse if (score >= 45) category = 'WARM';\nelse category = 'COLD';\n\nreturn [{\n  json: {\n    lead: { ...profile, meddic_score: score, meddic_category: category, meddic_details: details },\n    company_data: company,\n    campaign\n  }\n}];"
+      },
+      "id": "meddic-scoring",
+      "name": "MEDDIC Scoring",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [4880, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nif (!staticData.allLeads) staticData.allLeads = [];\n\nconst item = $input.all()[0].json;\nstaticData.allLeads.push({\n  company: item.company_data.name,\n  website: item.company_data.website,\n  industry: (item.company_data.industry_indicators || []).join(', '),\n  tech_stack: (item.company_data.tech_stack_indicators || []).join(', '),\n  full_name: item.lead.full_name,\n  job_title: item.lead.job_title,\n  email: item.lead.email,\n  email_verified: item.lead.email_verified ? 'Ja' : 'Nein',\n  email_status: item.lead.email_status,\n  email_confidence: item.lead.email_confidence,\n  linkedin_url: item.lead.linkedin_url,\n  location: item.lead.location,\n  headline: item.lead.headline,\n  meddic_score: item.lead.meddic_score,\n  meddic_category: item.lead.meddic_category,\n  metrics_score: item.lead.meddic_details.metrics.score,\n  metrics_reason: item.lead.meddic_details.metrics.reason,\n  economic_buyer_score: item.lead.meddic_details.economic_buyer.score,\n  economic_buyer_reason: item.lead.meddic_details.economic_buyer.reason,\n  decision_criteria_score: item.lead.meddic_details.decision_criteria.score,\n  decision_criteria_reason: item.lead.meddic_details.decision_criteria.reason,\n  decision_process_score: item.lead.meddic_details.decision_process.score,\n  decision_process_reason: item.lead.meddic_details.decision_process.reason,\n  identify_pain_score: item.lead.meddic_details.identify_pain.score,\n  identify_pain_reason: item.lead.meddic_details.identify_pain.reason,\n  champion_score: item.lead.meddic_details.champion.score,\n  champion_reason: item.lead.meddic_details.champion.reason,\n  campaign: item.campaign.name,\n  timestamp: new Date().toISOString()\n});\n\nreturn $input.all();"
+      },
+      "id": "collect-leads",
+      "name": "Collect All Scored Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5100, 560]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "check-score",
+              "leftValue": "={{ $json.lead.meddic_score }}",
+              "rightValue": 45,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-warm-hot",
+      "name": "Filter — Only WARM + HOT for Outreach",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [5320, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead = $input.all()[0].json.lead;\nconst company = $input.all()[0].json.company_data;\nconst campaign = $input.all()[0].json.campaign;\n\nconst templates = {\n  oracle_isv_default: {\n    subject_de: 'Cloud-Infrastruktur für {companyName}?',\n    body_de: 'Sehr geehrte/r {firstName} {lastName},\\n\\nich kontaktiere Sie, da {companyName} als innovatives Unternehmen in {industry} sicherlich von einer skalierbaren Cloud-Infrastruktur profitieren könnte.\\n\\nOracle Cloud Infrastructure (OCI) bietet ISV-Partnern wie {companyName} besondere Vorteile:\\n\\n- Bis zu 50% Kostenersparnis gegenüber anderen Hyperscalern\\n- Universal Credits für flexible Nutzung aller Cloud-Services\\n- Dedizierte EU Sovereign Cloud für DSGVO-Compliance\\n- Multicloud-Integration mit Azure und AWS\\n\\nHätten Sie nächste Woche 15 Minuten für ein kurzes Gespräch?\\n\\nMit freundlichen Grüßen'\n  },\n  oracle_isv_multicloud: {\n    subject_de: 'Multicloud-Strategie für {companyName}',\n    body_de: 'Sehr geehrte/r {firstName} {lastName},\\n\\ndie Multicloud-Strategie gewinnt für ISVs in {industry} zunehmend an Bedeutung. Oracle hat mit Database@Azure und der OCI-AWS Interconnect eine neue Ära der Multicloud-Integration eingeläutet.\\n\\nFür {companyName} könnte dies bedeuten:\\n- Ihre bestehende Infrastruktur bleibt — Oracle ergänzt nahtlos\\n- Oracle Database Services direkt in Azure verfügbar\\n- Universal Credits: Ein Budget, alle Services\\n\\nDarf ich Ihnen in einem 15-minütigen Call zeigen, wie andere ISVs in der DACH-Region davon profitieren?\\n\\nMit freundlichen Grüßen'\n  }\n};\n\nconst template = templates[campaign.email_template_id] || templates.oracle_isv_default;\nconst lang = campaign.language || 'de';\n\nlet subject = template[`subject_${lang}`] || template.subject_de;\nlet body = template[`body_${lang}`] || template.body_de;\n\nconst replacements = {\n  '{firstName}': lead.first_name,\n  '{lastName}': lead.last_name,\n  '{companyName}': company.name,\n  '{industry}': (company.industry_indicators || ['Technology']).join(', ')\n};\n\nfor (const [key, value] of Object.entries(replacements)) {\n  subject = subject.split(key).join(value);\n  body = body.split(key).join(value);\n}\n\nreturn [{\n  json: {\n    email_to: lead.email,\n    email_subject: subject,\n    email_body: body,\n    lead,\n    company_data: company,\n    campaign,\n    sequence_step: 1,\n    sent_at: null\n  }\n}];"
+      },
+      "id": "build-email",
+      "name": "Build Email Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5540, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst today = new Date().toISOString().slice(0, 10);\n\nif (!staticData.emailsSent) staticData.emailsSent = {};\nif (!staticData.emailsSent[today]) staticData.emailsSent[today] = 0;\n\nconst limit = $input.all()[0].json.campaign.max_emails_per_day || 30;\nconst sentToday = staticData.emailsSent[today];\n\nif (sentToday >= limit) {\n  return [{\n    json: { ...($input.all()[0].json), delayed: true, delay_reason: `Tageslimit ${limit} erreicht (${sentToday} gesendet)` }\n  }];\n}\n\nstaticData.emailsSent[today] = sentToday + 1;\nreturn [{\n  json: { ...($input.all()[0].json), delayed: false, email_number_today: sentToday + 1 }\n}];"
+      },
+      "id": "check-limit",
+      "name": "Check Daily Email Limit",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5760, 460]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "id": "check-delayed",
+              "leftValue": "={{ $json.delayed }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-delayed",
+      "name": "IF — Email Delayed?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [5980, 460]
+    },
+    {
+      "parameters": {
+        "resume": "timeInterval",
+        "amount": 1,
+        "unit": "days"
+      },
+      "id": "schedule-tomorrow",
+      "name": "Schedule for Tomorrow",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [6200, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.microsoft.com/v1.0/me/sendMail",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "oAuth2Api",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"message\": {\n    \"subject\": \"{{ $json.email_subject }}\",\n    \"body\": {\n      \"contentType\": \"HTML\",\n      \"content\": \"{{ $json.email_body.split('\\\\n').join('<br>') }}\"\n    },\n    \"toRecipients\": [\n      {\n        \"emailAddress\": {\n          \"address\": \"{{ $json.email_to }}\",\n          \"name\": \"{{ $json.lead.full_name }}\"\n        }\n      }\n    ],\n    \"importance\": \"normal\"\n  },\n  \"saveToSentItems\": true\n}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "send-email",
+      "name": "Send Email via Microsoft Graph",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [6200, 560],
+      "credentials": {
+        "oAuth2Api": {
+          "id": "MICROSOFT_GRAPH_CREDENTIAL_ID",
+          "name": "Microsoft Graph OAuth2"
+        }
+      },
+      "onError": "continueRegularOutput",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nif (!staticData.sentEmails) staticData.sentEmails = [];\n\nconst prevData = $('Check Daily Email Limit').first().json;\n\nconst record = {\n  email: prevData.email_to,\n  lead_name: prevData.lead.full_name,\n  company: prevData.company_data.name,\n  subject: prevData.email_subject,\n  sent_at: new Date().toISOString(),\n  sequence_step: prevData.sequence_step,\n  follow_up_days: prevData.campaign.follow_up_days,\n  next_follow_up: null\n};\n\nconst followUpDays = record.follow_up_days || [3, 7, 14];\nif (record.sequence_step <= followUpDays.length) {\n  const daysUntil = followUpDays[record.sequence_step - 1];\n  record.next_follow_up = new Date(Date.now() + daysUntil * 86400000).toISOString();\n}\n\nstaticData.sentEmails.push(record);\n\nreturn [{\n  json: { ...(prevData), sent_at: record.sent_at, next_follow_up: record.next_follow_up }\n}];"
+      },
+      "id": "log-email",
+      "name": "Log Email Sent",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [6420, 560]
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 91) + 30 }}",
+        "unit": "seconds"
+      },
+      "id": "wait-between-emails",
+      "name": "Wait Between Emails",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [6640, 560]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst leads = staticData.allLeads || [];\n\nconst headers = [\n  'Firma', 'Website', 'Branche', 'Tech-Stack',\n  'Name', 'Jobtitel', 'Email', 'Email Verifiziert', 'Email Status', 'Email Confidence',\n  'LinkedIn', 'Standort', 'Headline',\n  'MEDDIC Score', 'MEDDIC Kategorie',\n  'Metrics', 'Metrics Detail',\n  'Economic Buyer', 'EB Detail',\n  'Decision Criteria', 'DC Detail',\n  'Decision Process', 'DP Detail',\n  'Identify Pain', 'IP Detail',\n  'Champion', 'Champion Detail',\n  'Kampagne', 'Zeitstempel'\n];\n\nconst rows = leads.map(l => [\n  l.company, l.website, l.industry, l.tech_stack,\n  l.full_name, l.job_title, l.email, l.email_verified, l.email_status, l.email_confidence,\n  l.linkedin_url, l.location, l.headline,\n  l.meddic_score, l.meddic_category,\n  l.metrics_score, l.metrics_reason,\n  l.economic_buyer_score, l.economic_buyer_reason,\n  l.decision_criteria_score, l.decision_criteria_reason,\n  l.decision_process_score, l.decision_process_reason,\n  l.identify_pain_score, l.identify_pain_reason,\n  l.champion_score, l.champion_reason,\n  l.campaign, l.timestamp\n]);\n\nconst csvContent = [headers, ...rows]\n  .map(row => row.map(cell => `\"${String(cell || '').replace(/\"/g, '\"\"')}\"`).join(','))\n  .join('\\n');\n\nconst buffer = Buffer.from(csvContent, 'utf-8');\nconst fileName = `MEDDIC_Leads_${new Date().toISOString().slice(0,10)}.csv`;\n\nstaticData.excelFileName = fileName;\n\nreturn [{\n  json: {\n    fileName,\n    totalLeads: leads.length,\n    hotLeads: leads.filter(l => l.meddic_category === 'HOT').length,\n    warmLeads: leads.filter(l => l.meddic_category === 'WARM').length,\n    coldLeads: leads.filter(l => l.meddic_category === 'COLD').length\n  },\n  binary: {\n    data: {\n      data: buffer.toString('base64'),\n      mimeType: 'text/csv',\n      fileName\n    }\n  }\n}];"
+      },
+      "id": "prepare-excel",
+      "name": "Prepare Excel Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [5540, 780]
+    },
+    {
+      "parameters": {
+        "fileName": "={{ $json.fileName }}",
+        "options": {}
+      },
+      "id": "write-excel",
+      "name": "Write Excel File",
+      "type": "n8n-nodes-base.writeBinaryFile",
+      "typeVersion": 1,
+      "position": [5760, 780]
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nconst allLeads = staticData.allLeads || [];\nconst sentEmails = staticData.sentEmails || [];\n\nconst summary = {\n  timestamp: new Date().toISOString(),\n  total_leads_found: allLeads.length,\n  leads_by_category: {\n    HOT: allLeads.filter(l => l.meddic_category === 'HOT').length,\n    WARM: allLeads.filter(l => l.meddic_category === 'WARM').length,\n    COLD: allLeads.filter(l => l.meddic_category === 'COLD').length\n  },\n  emails_sent: sentEmails.length,\n  excel_file: staticData.excelFileName || 'MEDDIC_Leads.csv',\n  companies_processed: [...new Set(allLeads.map(l => l.company))].length\n};\n\nreturn [{ json: summary }];"
+      },
+      "id": "aggregate-results",
+      "name": "Aggregate Results",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [6860, 560]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "webhook-response",
+      "name": "Respond — Webhook Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [7080, 560]
+    },
+    {
+      "parameters": {
+        "content": "## PHASE 1: Firmen-Analyse\nScrape Website → Extract Info (Branche, Tech-Stack)",
+        "width": 480,
+        "height": 120
+      },
+      "id": "note-phase1",
+      "name": "Sticky Note — Phase 1",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [880, 400]
+    },
+    {
+      "parameters": {
+        "content": "## PHASE 2: LinkedIn Personen finden\nPhantombuster Search → Parse → Deduplicate",
+        "width": 680,
+        "height": 120
+      },
+      "id": "note-phase2",
+      "name": "Sticky Note — Phase 2",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [1540, 400]
+    },
+    {
+      "parameters": {
+        "content": "## PHASE 3: Email Finder (Prospeo)\nLinkedIn Email Finder → Fallback → Process Result",
+        "width": 720,
+        "height": 120
+      },
+      "id": "note-phase3",
+      "name": "Sticky Note — Phase 3",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [3080, 400]
+    },
+    {
+      "parameters": {
+        "content": "## PHASE 4: Email Verification (Bouncer)\nVerify → Filter deliverable/risky only",
+        "width": 500,
+        "height": 120
+      },
+      "id": "note-phase4",
+      "name": "Sticky Note — Phase 4",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [4180, 400]
+    },
+    {
+      "parameters": {
+        "content": "## PHASE 5: MEDDIC Scoring + Excel Export\nScore (0-100) → Collect → Excel → Filter WARM+HOT",
+        "width": 540,
+        "height": 120
+      },
+      "id": "note-phase5",
+      "name": "Sticky Note — Phase 5",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [4840, 400]
+    },
+    {
+      "parameters": {
+        "content": "## PHASE 6: Email Outreach (Microsoft Graph)\nBuild Email → Check Limit → Send via Outlook → Log",
+        "width": 760,
+        "height": 120
+      },
+      "id": "note-phase6",
+      "name": "Sticky Note — Phase 6",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [5500, 280]
+    },
+    {
+      "parameters": {
+        "content": "## TRIGGER & INPUT\nManual oder Webhook → Validate → Split Companies",
+        "width": 540,
+        "height": 120
+      },
+      "id": "note-trigger",
+      "name": "Sticky Note — Trigger",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [180, 340]
+    },
+    {
+      "parameters": {
+        "content": "## ERGEBNIS\nAggregate → Webhook Response",
+        "width": 340,
+        "height": 120
+      },
+      "id": "note-result",
+      "name": "Sticky Note — Result",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [6820, 400]
+    }
+  ],
+  "connections": {
+    "Start — Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start — Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Split Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Companies": {
+      "main": [
+        [
+          {
+            "node": "Scrape Company Website",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Excel Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Scrape Company Website": {
+      "main": [
+        [
+          {
+            "node": "Extract Company Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Company Info": {
+      "main": [
+        [
+          {
+            "node": "Wait — Rate Limit Company",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait — Rate Limit Company": {
+      "main": [
+        [
+          {
+            "node": "Build Phantombuster Searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Phantombuster Searches": {
+      "main": [
+        [
+          {
+            "node": "Phantombuster — LinkedIn Search Export",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Phantombuster — LinkedIn Search Export": {
+      "main": [
+        [
+          {
+            "node": "Wait for Phantombuster",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Phantombuster": {
+      "main": [
+        [
+          {
+            "node": "Fetch Phantombuster Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Phantombuster Results": {
+      "main": [
+        [
+          {
+            "node": "Parse LinkedIn Profiles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse LinkedIn Profiles": {
+      "main": [
+        [
+          {
+            "node": "Deduplicate Profiles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Deduplicate Profiles": {
+      "main": [
+        [
+          {
+            "node": "Wait — Rate Limit Phantombuster",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait — Rate Limit Phantombuster": {
+      "main": [
+        [
+          {
+            "node": "Prospeo — LinkedIn Email Finder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prospeo — LinkedIn Email Finder": {
+      "main": [
+        [
+          {
+            "node": "IF — Prospeo Email Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — Prospeo Email Found?": {
+      "main": [
+        [
+          {
+            "node": "Process Prospeo Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prospeo — Email Finder (Fallback)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prospeo — Email Finder (Fallback)": {
+      "main": [
+        [
+          {
+            "node": "Process Prospeo Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Prospeo Result": {
+      "main": [
+        [
+          {
+            "node": "Wait — Rate Limit Prospeo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait — Rate Limit Prospeo": {
+      "main": [
+        [
+          {
+            "node": "Bouncer — Verify Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Bouncer — Verify Email": {
+      "main": [
+        [
+          {
+            "node": "Filter Verified Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Verified Emails": {
+      "main": [
+        [
+          {
+            "node": "Wait — Rate Limit Bouncer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait — Rate Limit Bouncer": {
+      "main": [
+        [
+          {
+            "node": "MEDDIC Scoring",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "MEDDIC Scoring": {
+      "main": [
+        [
+          {
+            "node": "Collect All Scored Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collect All Scored Leads": {
+      "main": [
+        [
+          {
+            "node": "Filter — Only WARM + HOT for Outreach",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter — Only WARM + HOT for Outreach": {
+      "main": [
+        [
+          {
+            "node": "Build Email Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Split Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Email Content": {
+      "main": [
+        [
+          {
+            "node": "Check Daily Email Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Daily Email Limit": {
+      "main": [
+        [
+          {
+            "node": "IF — Email Delayed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "IF — Email Delayed?": {
+      "main": [
+        [
+          {
+            "node": "Schedule for Tomorrow",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Email via Microsoft Graph",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule for Tomorrow": {
+      "main": [
+        [
+          {
+            "node": "Check Daily Email Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send Email via Microsoft Graph": {
+      "main": [
+        [
+          {
+            "node": "Log Email Sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log Email Sent": {
+      "main": [
+        [
+          {
+            "node": "Wait Between Emails",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait Between Emails": {
+      "main": [
+        [
+          {
+            "node": "Split Companies",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Excel Data": {
+      "main": [
+        [
+          {
+            "node": "Write Excel File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write Excel File": {
+      "main": [
+        [
+          {
+            "node": "Aggregate Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate Results": {
+      "main": [
+        [
+          {
+            "node": "Respond — Webhook Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "name": "B2B Outreach",
+      "createdAt": "2026-03-09T00:00:00.000Z",
+      "updatedAt": "2026-03-09T00:00:00.000Z"
+    },
+    {
+      "name": "Oracle ISV",
+      "createdAt": "2026-03-09T00:00:00.000Z",
+      "updatedAt": "2026-03-09T00:00:00.000Z"
+    }
+  ],
+  "triggerCount": 0,
+  "updatedAt": "2026-03-09T00:00:00.000Z",
+  "versionId": "1"
+}
