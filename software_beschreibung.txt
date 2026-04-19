@@ -1,0 +1,13 @@
+[PLATZHALTER – Ersetze diesen Text mit deiner echten Software-Beschreibung]
+
+Beispiel:
+Unsere Software XYZ automatisiert die manuelle Dateneingabe in ERP-Systemen.
+Sie integriert sich nahtlos in SAP, Salesforce und andere gängige Systeme.
+Typische Kunden reduzieren ihren administrativen Aufwand um 60% innerhalb
+der ersten drei Monate.
+
+Hauptfunktionen:
+- Automatische Belegverarbeitung (Rechnungen, Lieferscheine)
+- KI-basierte Datenerkennung mit 99,2% Genauigkeit
+- Echtzeit-Synchronisation mit bestehenden Systemen
+- Compliance-konforme Archivierung (GoBD, DSGVO)
